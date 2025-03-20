@@ -1,8 +1,8 @@
 _addon.name = 'AutoSkillchain'
 _addon.author = 'Ameilia'
 _addon.commands = {'autosc','asc','autoskillchain'}
-_addon.version = '0.9.0'
-_addon.lastUpdate = '2018.07.02'
+_addon.version = '1.1'
+_addon.lastUpdate = '2020.08.28'
 
 require('luau')
 require('lor/lor_utils')
@@ -11,18 +11,29 @@ _libs.lor.req('all')
 _libs.lor.debug = false
 
 local rarr = string.char(129,168)
-local bags = {[0]='inventory',[8]='wardrobe',[10]='wardrobe2',[11]='wardrobe3',[12]='wardrobe4'}
+local bags = {[0]='inventory',[8]='wardrobe',[10]='wardrobe2',[11]='wardrobe3',[12]='wardrobe4',[13]='wardrobe5',[14]='wardrobe6',[15]='wardrobe7',[16]='wardrobe8'}
 local enabled = false
 local wsDelay = 4
+local useAutoRA = false
+local araDelay = 0
 local chains
 
 local player = windower.ffxi.get_player()
-local job = player.main_job
 local selected_chain_index = 1
 local chain_index = 1
 local activeChain
 local chain_name
+local distance_msg_enabled = true
 
+local use_keybinds = true
+local keybind = 'k'
+
+local max_distances = {['melee'] = 6.95, ['ranged'] = 21.99}
+local mode = 'melee'
+local aftermath = false
+
+local pet_moves = require('pet_moves')
+local aftermath_weapons = require('aftermaths')
 
 windower.register_event('addon command', function (command,...)
 	command = command and command:lower() or 'help'
@@ -31,7 +42,7 @@ windower.register_event('addon command', function (command,...)
 	local player = windower.ffxi.get_player()
 	local job = player.main_job
 	
-	if S{'reload','unload'}:contains(command) then
+	if S{'r','u','reload','unload'}:contains(command) then
 		windower.send_command('lua %s %s':format(command, _addon.name))
 	elseif S{'enable','on','start'}:contains(command) then
 		enabled = true
@@ -49,9 +60,40 @@ windower.register_event('addon command', function (command,...)
 	elseif command == 'cycle_chain' then
 		selected_chain_index = (selected_chain_index % #chains) + 1
 		set_chain(selected_chain_index)
+	elseif command == 'mode' then
+		mode_str = args[1] and args[1]:lower()
+		if (S{'melee','ranged'}:contains(mode_str)) then
+			mode = args[1]
+			atcc(50, 'AutoSkillChain mode set to ' .. mode)
+		else 
+			atcc(50, 'AutoSkillchain invalid mode: valid options are melee or ranged.')
+		end
+		refresh_from_file()
+	elseif S{'aftermath','am3'}:contains(command) then
+		local state = args[1]
+		if S{'on','start'}:contains(state) and can_aftermath() then
+			aftermath = true
+			atcc(50, 'Autoskillchain Aftermath enabled')
+		elseif S{'off','stop'}:contains(state) then
+			aftermath = false
+			atcc(50, 'Autoskillchain Aftermath disabled')
+		else
+			aftermath = false
+			atcc(123, 'Autoskillchain Error: Equipped weapon is not configured for Aftermath handling.')
+		end
 	elseif command == 'refresh' then
 		refresh_from_file()
-		print_status()
+	elseif command == 'autora' then
+		local cmd = args[2] and args[2]:lower() or (useAutoRA and 'off' or 'on')
+		if S{'on'}:contains(cmd) then
+			useAutoRA = true
+			atc('AutoSkillChain will now resume auto ranged attacks after WSing')
+		elseif S{'off'}:contains(cmd) then
+			useAutoRA = false
+			atc('AutoSkillChain will no longer resume auto ranged attacks after WSing')
+		else
+			atc(123,'Error: invalid argument for AutoRA: '..cmd)
+		end		
 	elseif S{'help','--help'}:contains(command) then
 		print_help()
 	elseif command == 'info' then
@@ -74,27 +116,31 @@ windower.register_event('load', function()
 	end
 	atcc(262, 'Welcome to AutoSkillChain!')
 	
-	refresh_from_file()
-	set_chain(1)
+	if(use_keybinds == true) then
+		windower.send_command('unbind ^'..keybind) 
+		windower.send_command('unbind !'..keybind)
+		windower.send_command('unbind @'..keybind)
+		windower.send_command('bind ^'..keybind..' asc toggle')
+		windower.send_command('bind !'..keybind..' asc cycle_chain')
+		windower.send_command('bind @'..keybind..' asc refresh')
+	end
 	
 	autowsLastCheck = os.clock()
-	
-	windower.send_command('unbind ^k')
-	windower.send_command('unbind !k')
-	windower.send_command('unbind @k')
-	windower.send_command('bind ^k asc toggle')
-	windower.send_command('bind !k asc cycle_chain')
-	windower.send_command('bind @k asc refresh')
+	coroutine.schedule(refresh_from_file, 2)
+end)
+
+windower.register_event('login', function()
+	coroutine.schedule(refresh_from_file, 10)
 end)
 
 windower.register_event('status change', function()
 	chain_index = 1
+	distance_msg_enabled = true
 end)
 
 
 windower.register_event('zone change', function(new_id, old_id)
 	autowsLastCheck = os.clock() + 15
-	refresh_from_file()
 end)
 
 
@@ -103,24 +149,48 @@ windower.register_event('job change', function()
 	job = player.main_job
 	enabled = false
 	refresh_from_file()
-	set_chain(1)
+	selected_chain_index = 1
+	set_chain(selected_chain_index)
 end)
 
 windower.register_event('prerender', function()
 	if enabled then
+		--atcc(123, 'enabled')
 		local now = os.clock()
-		if (now - autowsLastCheck) >= wsDelay then
+
+		if (now - autowsLastCheck) >= wsDelay and (now - araDelay >= 0) then
 			local player = windower.ffxi.get_player()
 			local mob = windower.ffxi.get_mob_by_target()
+			local ws = activeChain['ws'][chain_index]
+
 			if (player ~= nil) and (player.status == 1) and (mob ~= nil) then
-				if player.vitals.tp > 999 then
-					handle_chain()
-					autowsLastCheck = now
+				if aftermath == true and can_aftermath() and not aftermath_up() then
+					if (player.vitals.tp > 2999) and distance_check(player, mob) then 
+						perform_ws(aftermath_weapons[weapon_name()])
+						chain_index = 1
+						autowsLastCheck = now
+					end
+				else 
+					if (player.vitals.tp > 999	or pet_moves['bst_ready']:contains(ws) or pet_moves['smn_pacts']:contains(ws)) and distance_check(player, mob) then
+						handle_chain()
+					end
 				end
 			end
 		end
 	end
 end)
+
+function distance_check(player, mob)
+	if(mob.distance:sqrt() > max_distances[mode]) then
+		if(distance_msg_enabled) then
+			atcc(263, 'AutoSkillChain out of range, holding weapon skill '..activeChain['ws'][chain_index])
+			distance_msg_enabled = false --don't spam the screen with the distance message.
+		end
+		return false
+	end
+	distance_msg_enabled = true
+	return true
+end
 
 function set_chain(chindex)
 	if not chains_defined() then
@@ -137,47 +207,138 @@ function set_chain(chindex)
 end
 	
 function handle_chain()
+	if activeChain == nil then
+		no_chains()
+		enabled = false
+		return
+	end
+	
 	local stop = false
+	local now = os.clock()
+	
 	if chain_index == #activeChain['ws'] and not activeChain['repeat'] then
 		stop = true
 	end	
 	
-	local ws = activeChain['ws'][chain_index]
-	--atcc(262, 'AutoSkillChain would perform '..ws)
-	windower.send_command('input /ws %s <t>':format(ws))
-	chain_index = (chain_index % #activeChain['ws']) + 1
-	
-	if stop then
-		enabled = false
-		atcc(17, 'Reached the end of the chain. Stopping AutoSC.')
+	if useAutoRA and (araDelay < 1) then
+		araDelay = now + 1.2
+	else
+		local ws = activeChain['ws'][chain_index]
+		perform_ws(ws)
+
+		chain_index = (chain_index % #activeChain['ws']) + 1
+		
+		if stop then
+			enabled = false
+			atcc(17, 'Reached the end of the chain. Stopping AutoSC.')
+		end
+		araDelay = 0
+		if useAutoRA then
+			windower.send_command('wait 4;ara start')
+		end
+		autowsLastCheck = now
 	end
 end
 
 function chains_defined() 
 	return #chains > 0
 end
+
 function no_chains()
-	local player = windower.ffxi.get_player()
-	local job = player.main_job
-	local skill = weap_type()
-	atcc(263,'No skillchains defined for '..job..' '..skill)
+	if not chains_defined() then
+		local player = windower.ffxi.get_player()
+		local job = player.main_job
+		local skill = weapon_type()
+		atcc(263,'No skillchains defined for '..job..' '..skill)
+	end
 end
 
-function weap_type()
-	local items = windower.ffxi.get_items()
-	local i,bag = items.equipment.main, items.equipment.main_bag
+function weapon_type()
 	local skill = 'Hand-to-Hand'
-	if i ~= 0 then  --0 => nothing equipped
+	local player = windower.ffxi.get_player()
+	local i,bag,items
+
+	if (player ~= nil) then
+		items = windower.ffxi.get_items()
+		if (mode:lower() == 'melee') then
+			i = items.equipment.main
+			bag = items.equipment.main_bag
+		elseif (mode:lower() == 'ranged') then
+			i = items.equipment.range
+			bag = items.equipment.range_bag
+		else 
+			atcc(263,'Something went terribly wrong. You should not be here.')
+			return 
+		end
+	end
+
+	if i ~= 0 and items[bags[bag]][i].id ~= 0 then  --0 => nothing equipped
 		skill = res.skills[res.items[items[bags[bag]][i].id].skill].en
 	end
 	return skill
 end
 
+function weapon_name()
+	local wname = 'naked'
+	local player = windower.ffxi.get_player()
+	items = windower.ffxi.get_items()
+
+	weapon = items.equipment.main
+	bag = items.equipment.main_bag
+	
+	if mode:lower() == 'ranged' then
+		weapon = items.equipment.range
+		bag = items.equipment.range_bag
+	end
+	
+	if weapon ~= 0 and items[bags[bag]][weapon].id ~= 0 then
+		wname = res.items[items[bags[bag]][weapon].id].en
+	end
+	
+	return wname
+end
+
+function can_aftermath()
+	local w = weapon_name()
+	return aftermath_weapons[w] ~= nil
+end
+
+function aftermath_up()
+	return T(windower.ffxi.get_player().buffs):contains(272)
+end
+
+function perform_ws(ws)
+		local input_str = 'input /ws "%s" <t>'
+		
+		if pet_moves['bst_ready']:contains(ws) then 
+			input_str = 'input /pet "%s" <me>'
+		elseif pet_moves['smn_pacts']:contains(ws) then 
+			input_str = 'input /pet "%s" <t>'
+		elseif S{'myrkr','moonlight','starlight'}:contains(ws:lower()) then 
+			input_str = 'input /ws "%s" <me>'
+		end
+		
+		windower.send_command(input_str:format(ws))
+end
+
 function refresh_from_file()
 	player = windower.ffxi.get_player()
+	player_mob_table = windower.ffxi.get_mob_by_index(player.index)
 	job = player.main_job
-	local skill = weap_type()
+	local skill = weapon_type()
+	local pet_chains = {}
+	
+	if S{'BST','SMN'}:contains(job) and player_mob_table.pet_index and player_mob_table.pet_index ~= 0 then
+		local pet_name = windower.ffxi.get_mob_by_index(player_mob_table.pet_index).name
+		pet_name = pet_name:stripchars(' ')
+		pet_chains = _libs.lor.settings.load('data/'..job..'/'..skill..'_'..pet_name..'.lua', {})
+	end
+	
 	chains = _libs.lor.settings.load('data/'..job..'/'..skill..'.lua', {})
+	if chains and pet_chains then 
+		chains:extend(pet_chains)
+	end
+	set_chain(1)
 end
 
 function print_status()
@@ -187,7 +348,7 @@ function print_status()
 	end
 	
 	local power = enabled and 'ON' or 'OFF'
-	local msg = '[AutoSC: %s] %s ':format(power, chain_name)
+	local msg = '[AutoSC: %s mode: %s] %s ':format(power, mode, chain_name)
 	if enabled then
 		msg = msg..rarr..' '..activeChain['ws']:tostring()
 	end
@@ -202,11 +363,14 @@ end
 function print_help()
 	local help = T{
 		['[on|off|toggle]'] = 'Enable / disable autoSkillchain',
-		['CTRL-K'] = 'Toggle autoSkillchain enabled/disabled',
-		['ALT-K'] = 'Cycle through ',
-		['Windows-K'] = 'Refresh job/weapon type information',
+		['autora [on|off]'] = 'Enable / disable the AutoRA addon',
+		['[aftermath|am3] [on|off]'] = 'Enable / disable AM3 handling',
+		['mode [melee|ranged]'] = 'Change distance calculation to melee/ranged mode',
+		['CTRL-'..keybind] = 'Toggle autoSkillchain enabled/disabled',
+		['ALT-'..keybind] = 'Cycle through defined chains',
+		['Windows-'..keybind] = 'Refresh job/weapon type information',
 	}
-	--local mwwidth = max(unpack(map(string.wlen, table.keys(help))))
+
 	local mwwidth = col_width(help:keys())
 	atcc(262, 'AutoSkillChain commands:')
 	for cmd,desc in opairs(help) do

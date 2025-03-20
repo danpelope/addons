@@ -19,5 +19,14 @@ return {
 		['repeat'] = true,
 		['ws'] = L{'Victory Smite','Victory Smite'}
 	},
-
+	{
+		['name'] = 'frog',
+		['repeat'] = true,
+		['ws'] = L{'Tornado Kick','Asuran Fists','Tornado Kick','Dragon Kick','Victory Smite'}
+	},
+	{
+		['name'] = 'howling fist',
+		['repeat'] = true,
+		['ws'] = L{'Howling Fist','Howling Fist'}
+	},
 }

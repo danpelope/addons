@@ -20,21 +20,24 @@ checktimer = 5
 function check_incoming_text(original)
 	local org = original:lower()
 	
-	if org:find('sparks of eminence, and now possess a total of 99999') ~= nil then
+	--if org:find('sparks of eminence, and now possess a total of 99999') ~= nil then
+	--	running = false
+	--	stop_bots(true)
+	--else
+	if org:find('one or more party/alliance members do not have the required') ~= nil then
 		running = false
-	elseif org:find('one or more party/alliance members do not have the required') ~= nil then
-		running = false
-		end
+		stop_bots(true)
+	end
 end
 
 function check()
-	windower.chat.input("/targetnpc")
-	coroutine.sleep(3) -- was 2
-	
 	if running == true then
+		--coroutine.sleep(3) -- was 2
+		
 		if windower.ffxi.get_mob_by_target('t') == nil or windower.ffxi.get_mob_by_target('t').name == nil then
+			press_key('tab')
 			windower.add_to_chat(167, 'No target found. Running check again.')
-			coroutine.sleep(checktimer)
+			coroutine.sleep(10)
 			check()
 		elseif windower.ffxi.get_mob_by_target('t').name == "Ethereal Junction" then
 			windower.add_to_chat(167, 'Junction found, spawning')
@@ -46,58 +49,38 @@ function check()
 			coroutine.sleep(checktimer)
 			check()
 		else
-			coroutine.sleep(checktimer) --was 10
-			windower.add_to_chat(167, 'Invalid target. Escaping and rechecking.')
-			windower.send_command('setkey ESCAPE down')
-			coroutine.sleep(0.5)
-			windower.send_command('setkey ESCAPE up')
-			coroutine.sleep(0.5)
+			press_key('tab')
+			coroutine.sleep(1) --was 10
+			windower.add_to_chat(167, 'Invalid target. Checking next.')
 			check()	
 		end
 	end
 end
 
 function poke()
-	windower.send_command('setkey enter down')
-	coroutine.sleep(0.5)
-	windower.send_command('setkey enter up')
-	coroutine.sleep(1.5)
-	
-	windower.send_command('setkey up down')
-	coroutine.sleep(0.5)
-	windower.send_command('setkey up up')
-	coroutine.sleep(0.5)
-		
-	
-	
-	windower.send_command('setkey enter down')
-	coroutine.sleep(0.5)
-	windower.send_command('setkey enter up')
-	coroutine.sleep(0.5)
-	
-	windower.send_command('setkey up down')
-	coroutine.sleep(0.5)
-	windower.send_command('setkey up up')
-	coroutine.sleep(0.5)
-	
-	windower.send_command('setkey enter down')
-	coroutine.sleep(0.5)
-	windower.send_command('setkey enter up')
-	coroutine.sleep(0.5)
-	
+	press_key('enter')
+	coroutine.sleep(1)
+	press_key('up')
+	press_key('enter')
+	press_key('up')
+	press_key('enter')
 	
 	windower.chat.input("/targetnpc")
-	coroutine.sleep(0.5)
 	
 	if running == true then
 		coroutine.sleep(checktimer)
 		check()
 	else
 		windower.add_to_chat(167, 'Stopping UNM during poke()')
-
 	end
 end
 
+function press_key(key)
+	windower.send_command('setkey '..key..' down')
+	coroutine.sleep(0.5)
+	windower.send_command('setkey '..key..' up')
+	coroutine.sleep(0.5)	
+end
 
 function unm_command(...)
 	if #arg > 3 then
@@ -113,6 +96,7 @@ function unm_command(...)
 	elseif #arg == 1 and arg[1]:lower() == 'stop' then
 		if running == true then
 			running = false
+			stop_bots(false)
 			windower.add_to_chat(200, 'UNM - STOP')
 		else
 			windower.add_to_chat(200, 'UNM is not running.')
@@ -129,6 +113,15 @@ function unm_command(...)
 	end
 end
 
+function stop_bots(warp)
+	coroutine.sleep(3)
+	windower.send_command('send @all sing off')
+	windower.send_command('send @all roll off')
+	coroutine.sleep(5)
+	if warp == true then
+		windower.send_command('send @all warp')
+	end
+end
 
 windower.register_event('addon command', unm_command)
 windower.register_event('incoming text', function(new, old)

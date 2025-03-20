@@ -31,18 +31,20 @@ _addon.version = '1.0'
 _addon.author = 'Ameilia'
 _addon.commands = {'eh','elementalhelper','elehelper'}
 
-elements = {'Stone','Water','Aero','Fire','Blizzard','Thunder'}
+elements = {'Stone','Water','Aero','Fire','Blizzard','Thunder','Light','Dark'}
 ancient = {'Quake','Flood','Tornado','Flare','Freeze','Burst'}
-helices = {'Geo','Hydro','Anemo','Pyro','Cryo','Iono'}
-storms = {'Sand','Rain','Wind','Fire','Hail','Thunder'}
+helices = {'Geo','Hydro','Anemo','Pyro','Cryo','Iono','Lumino','Nocto'}
+storms = {'Sand','Rain','Wind','Fire','Hail','Thunder','Aurora','Void'}
 gas = {'Stone','Water','Aero','Fira','Blizza','Thunda'}
 ras = {'Stone','Wate','Ae','Fi','Blizza','Thunda'}
-sc1 = {'Aero','Stone','Stone','Stone','Water','Water'}
-sc2 = {'Stone','Water','Aero','Fire','Blizzard','Thunder'}
-shots = {'Earth','Water','Wind','Fire','Ice','Thunder'}
-brd = {'Earth','Water','Wind','Fire','Ice','Lightning'}
-runes = {'Tellus','Unda','Flabra','Ignis','Gelus','Sulpor'}
+sc1 = {'Aero','Stone','Stone','Stone','Water','Water','Noctohelix','Blizzard'}
+sc2 = {'Stone','Water','Aero','Fire','Blizzard','Thunder','Luminohelix','Noctohelix'}
+shots = {'Earth','Water','Wind','Fire','Ice','Thunder','Light','Dark'}
+brd = {'Earth','Water','Wind','Fire','Ice','Lightning','Light','Dark'}
+runes = {'Tellus','Unda','Flabra','Ignis','Gelus','Sulpor','Lux','Tenebrae'}
 nin = {'Doton','Suiton','Huton','Katon','Hyoton','Raiton'}
+barelements = {'Barstonra','Barwatera','Baraera','Barfira','Barblizzara','Barthundra'}
+bardebuffs = {'Barpetra','Barpoisonra','Barsilencera','Baramnesra','Barparalyzra','Barvira'}
 
 eleIndex = 1
 
@@ -51,6 +53,8 @@ function handle_spell(spelltype, cmdParams)
     local tier = ''
 	local spellstr = elements[eleIndex]
 
+	local player = windower.ffxi.get_player()
+
 	if cmdParams[1] then
         tier = cmdParams[1]:upper()	
 		if(tier == 'I') then
@@ -58,9 +62,16 @@ function handle_spell(spelltype, cmdParams)
 		end
     end
 	
+	if(S{'Light','Dark'}:contains(spellstr)) then
+		if(S{'n','nuke','ga','ra','ja','ancient','anc','nin','bar','bars','bardebuff'}:contains(spelltype)) then
+			windower.add_to_chat(50, 'ElementalHelper: No spell defined for '..spellstr..' '..spelltype..'.')
+			return
+		end
+	end
+	
 	if(S{'ga','ja'}:contains(spelltype)) then
 		spellstr = gas[eleIndex] .. spelltype
-	elseif spelltype == 'ancient' then
+	elseif (S{'ancient','anc'}:contains(spelltype))then
 		spellstr = ancient[eleIndex]
 	elseif spelltype == 'ra' then
 		spellstr = ras[eleIndex] .. spelltype
@@ -81,17 +92,45 @@ function handle_spell(spelltype, cmdParams)
 		end
 		spellstr = brdspell .. ' ' .. spelltype
 	elseif spelltype == 'nin' then
-		spellstr = nin[eleIndex] .. ': '
+		spellstr = nin[eleIndex] .. ':'
+		if S{'','I','1'}:contains(tier) then
+			tier = 'Ichi'
+		elseif S{'II','2'}:contains(tier) then
+			tier = 'Ni'
+		elseif S{'III','3'}:contains(tier) then 
+			tier = 'San'
+		end
+	elseif spelltype == 'en' then
+		spellstr = 'En'..spellstr:lower()
+		target = '<me>'
 	elseif spelltype == 'sc1' then
 		spellstr = sc1[eleIndex]
-		windower.send_command('input /ja "Immanence" <me>;wait 1;input /p '..elements[eleIndex]..' Skillchain #1 (Fast>Fast)')
+		windower.send_command('input /ja "Immanence" <me>;wait 1;input /p '..elements[eleIndex]..' Skillchain #1')
 	elseif spelltype == 'sc2' then
 		spellstr = sc2[eleIndex]
-		windower.send_command('input /ja "Immanence" <me>;wait 1;input /p '..elements[eleIndex]..' Skillchain #2 (Fast)')
+		windower.send_command('input /ja "Immanence" <me>;wait 1;input /p '..elements[eleIndex]..' Skillchain #2')
+	elseif spelltype == 'bar' then
+		if S{player.main_job, player.sub_job}:contains('WHM') then
+			spellstr = barelements[eleIndex]
+		elseif S{player.main_job, player.sub_job}:contains('SCH') then
+			windower.send_command('input /ja "Accession" <me>;wait 1;input /ja "Perpetuance" <me>;')
+			spellstr = 'Bar'..elements[eleIndex]
+			coroutine.sleep(5.0)
+		else
+			spellstr = 'Bar'..elements[eleIndex]
+		end
+		target = '<me>'
+	elseif spelltype == 'bardebuff' then
+		spellstr = bardebuffs[eleIndex]
+		target = '<me>'		
 	end
     	
 	local spell = spellstr..' '..tier	
 	windower.send_command('@input /ma "'..spell..'" '..target)
+	
+	if(S{'ja'}:contains(spelltype)) then
+		windower.send_command('wait 4;input /p '..gas[eleIndex] .. spelltype..' away. '..shots[eleIndex]..' '..'Shot please.')
+	end
 end
 
 function handle_ja(jatype)
@@ -117,8 +156,13 @@ windower.register_event('addon command',function(...)
 			eleIndex = (eleIndex % #elements) + 1
 			report_nuke()
 			windower.send_command('ank setnuke '..elements[eleIndex])
-		elseif S{'storm','nuke','n','helix','ga','ja','ra','sc1','sc2','threnody','carol','ancient','nin'}:contains(first) then
+			windower.send_command('sing setelement '..brd[eleIndex])
+		elseif S{'storm','nuke','n','helix','ga','ja','ra','sc1','sc2','threnody','carol','ancient','anc','nin','en','bar','bardebuff'}:contains(first) then
 			handle_spell(first, args)
+		elseif first == 'bars' then
+			handle_spell('bar', args)
+			coroutine.sleep(7)
+			handle_spell('bardebuff',args)
 		elseif S{'shot','rune'}:contains(first) then
 			handle_ja(first)
 		elseif S{'unload','reload'}:contains(first) then
@@ -158,12 +202,17 @@ function print_help()
 	windower.add_to_chat(50, 'ElementalHelper usage (//eh):')
 	windower.add_to_chat(50, '   cycle - Cycles the element')
 	windower.add_to_chat(50, '   set (element) - Sets the element directly')
-	windower.add_to_chat(50, '   nuke/n (I,II,III,IV,V) - Cast (element) (tier)')
-	windower.add_to_chat(50, '   ancient (I,II) - Cast AM (tier)')
+	windower.add_to_chat(50, '   nuke/n (I,II,III,IV,V,VI) - Cast (element) (tier)')
+	windower.add_to_chat(50, '   ancient/anc (I,II) - Cast AM (tier)')
 	windower.add_to_chat(50, '   ga (I,II,III) - Cast (element)ga (tier)')
 	windower.add_to_chat(50, '   ja - Cast (element)ja')
+	windower.add_to_chat(50, '   en (I, II) - cast En(element) (tier)')
 	windower.add_to_chat(50, '   helix (I,II) - Cast (element)helix (tier)')
 	windower.add_to_chat(50, '   storm (I,II) - Cast (element)storm (tier)')
+	windower.add_to_chat(50, '   bar - Cast bar(element)ra')
+	windower.add_to_chat(50, '   bardebuff - Cast bar(element-debuff)ra i.e. Barparalyzra for ice')
+	windower.add_to_chat(50, '   bars - Cast bar(element)ra and bar(element-debuff)ra')
+	windower.add_to_chat(50, '   nin (I,II,III) - Cast (element) ninjutsu (tier)')
 	windower.add_to_chat(50, '   threnody (I,II) - Cast (element)threnody (tier)')
 	windower.add_to_chat(50, '   carol (I,II) - Cast (element)carol (tier)')
 	windower.add_to_chat(50, '   shot - use (element) quickdraw')
